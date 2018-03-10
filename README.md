@@ -1,3 +1,2 @@
-# Forked from FreeRTOS HTTP Request Example
+# Somnode Firmware for ESP32 architecture
 
-Uses a POSIX socket to make a very simple HTTP request.
