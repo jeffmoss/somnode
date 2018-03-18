@@ -8,6 +8,7 @@
 */
 #include <string.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_system.h"
@@ -15,12 +16,47 @@
 #include "esp_event_loop.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "driver/i2s.h"
 
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include "lwip/netdb.h"
 #include "lwip/dns.h"
+
+#if defined(INT_DATA) || defined(INT_EVENT) || defined(INT_CLICK)
+#define INT_USED
+#endif
+
+#include "lis3dh.h"
+
+// user task stack depth for ESP32
+#define TASK_STACK_DEPTH 2048
+
+/* -- use following constants to define the lis3dh mode ----------- */
+
+// #define SPI_USED     // SPI interface is used, otherwise I2C
+#define FIFO_MODE    // multiple sample read mode
+// #define INT_DATA     // data interrupts used (data ready and FIFO status)
+// #define INT_EVENT    // inertial event interrupts used (wake-up, free fall or 6D/4D orientation)
+// #define INT_CLICK    // click detection interrupts used
+
+// SPI interface definitions for ESP32
+#define SPI_BUS       HSPI_HOST
+#define SPI_SCK_GPIO  16
+#define SPI_MOSI_GPIO 17
+#define SPI_MISO_GPIO 18
+#define SPI_CS_GPIO   19
+
+// I2C interface defintions for ESP32
+#define I2C_BUS       0
+#define I2C_SCL_PIN   14
+#define I2C_SDA_PIN   13
+#define I2C_FREQ      I2C_FREQ_100K
+
+// interrupt GPIOs defintions for ESP32
+#define INT1_PIN      5
+#define INT2_PIN      4
 
 /* The examples use simple WiFi configuration that you can set via
    'make menuconfig'.
@@ -40,16 +76,41 @@ static EventGroupHandle_t wifi_event_group;
 const int CONNECTED_BIT = BIT0;
 
 /* Constants that aren't configurable in menuconfig */
-#define WEB_SERVER "blob.tomerweller.com"
+#define WEB_SERVER "heavyobjects.com"
 #define WEB_PORT 80
 #define WEB_URL "/"
 
-static const char *TAG = "blob";
+static const char *TAG = "somnode";
 
 static const char *REQUEST = "GET " WEB_URL " HTTP/1.1\n"
     "Host: "WEB_SERVER"\n"
     "User-Agent: esp-idf/1.0 esp32\n"
     "\n";
+
+static lis3dh_sensor_t* sensor;
+
+static const int i2s_num = 0; // i2s port number
+
+const int sample_rate = 44100;
+
+static const i2s_config_t i2s_config = {
+  .mode = I2S_MODE_MASTER | I2S_MODE_RX,
+  .sample_rate = 44100,
+  .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT, // 16
+  .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+  .communication_format = I2S_COMM_FORMAT_I2S_MSB, // I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB
+  .intr_alloc_flags = 0, // default interrupt priority
+  .dma_buf_count = 32,
+  .dma_buf_len = 32 * 2,
+  .use_apll = false
+};
+
+static const i2s_pin_config_t pin_config = {
+  .bck_io_num = GPIO_NUM_27,
+  .ws_io_num = GPIO_NUM_25,
+  .data_out_num = I2S_PIN_NO_CHANGE,
+  .data_in_num = GPIO_NUM_26
+};
 
 static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
@@ -72,6 +133,41 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     return ESP_OK;
 }
 
+/**
+ * Common function used to get sensor data.
+ */
+void read_data ()
+{
+    #ifdef FIFO_MODE
+
+    lis3dh_float_data_fifo_t fifo;
+
+    if (lis3dh_new_data (sensor))
+    {
+        uint8_t num = lis3dh_get_float_data_fifo (sensor, fifo);
+
+        ESP_LOGD(TAG, "%.3f LIS3DH num=%d\n", (double)sdk_system_get_time()*1e-3, num);
+
+        for (int i=0; i < num; i++)
+            // max. full scale is +-16 g and best resolution is 1 mg, i.e. 5 digits
+	    ESP_LOGD(TAG, "%.3f LIS3DH (xyz)[g] ax=%+7.3f ay=%+7.3f az=%+7.3f\n",
+                   (double)sdk_system_get_time()*1e-3, 
+                   fifo[i].ax, fifo[i].ay, fifo[i].az);
+    }
+
+    #else
+
+    lis3dh_float_data_t  data;
+
+    if (lis3dh_new_data (sensor) &&
+        lis3dh_get_float_data (sensor, &data))
+        // max. full scale is +-16 g and best resolution is 1 mg, i.e. 5 digits
+        ESP_LOGD(TAG, "%.3f LIS3DH (xyz)[g] ax=%+7.3f ay=%+7.3f az=%+7.3f\n",
+		 (double)sdk_system_get_time()*1e-3, data.ax, data.ay, data.az);
+        
+    #endif // FIFO_MODE
+}
+
 static void initialise_wifi(void)
 {
     tcpip_adapter_init();
@@ -90,6 +186,76 @@ static void initialise_wifi(void)
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
     ESP_ERROR_CHECK( esp_wifi_start() );
+}
+
+static void init_i2s()
+{
+    i2s_driver_install(i2s_num, &i2s_config, 0, NULL);   //install and start i2s driver
+
+    i2s_set_pin(i2s_num, &pin_config);
+
+    i2s_set_sample_rates(i2s_num, sample_rate); //set sample rates
+
+    ESP_LOGI(TAG, "Configured microphone.");
+}
+
+static void microphone_task(void *pvParameters)
+{
+    uint16_t buf_len = 1024;
+    char *buf = calloc(buf_len, sizeof(char));
+
+    init_i2s();
+
+    // i2s_driver_uninstall(i2s_num);
+    // ESP_LOGI(TAG, "Stopped microphone.");
+
+    ESP_LOGI(TAG, "Reading mic\r\n");
+
+    int cnt = 0;
+
+    while (1)
+    {
+        // passive waiting until 1 second is over
+        // vTaskDelay(100/portTICK_PERIOD_MS);
+
+        char *buf_ptr_read = buf;
+
+        // read whole block of samples
+        int bytes_read = 0;
+        while(bytes_read == 0) {
+	    bytes_read = i2s_read_bytes(i2s_num, buf, buf_len, 0);
+        }
+
+	ESP_LOGI(TAG, "Read %d bytes", bytes_read);
+
+	uint32_t samples_read = bytes_read / 2 / (I2S_BITS_PER_SAMPLE_32BIT / 8);
+
+	ESP_LOGI(TAG, "Read %d samples (%d)", samples_read, buf_ptr_read[3]);
+
+	cnt += samples_read;
+
+	if(cnt >= sample_rate) {
+	    cnt = 0;
+
+	    ESP_LOGI(TAG, "Sample read complete");
+	}
+    }
+}
+
+static void periodic_accel_task(void *pvParameters)
+{
+    vTaskDelay (100/portTICK_PERIOD_MS);
+    
+    while (1)
+    {
+	ESP_LOGI(TAG, "Reading accel data\r\n");
+
+        // read sensor data
+        read_data ();
+
+        // passive waiting until 1 second is over
+        vTaskDelay(100/portTICK_PERIOD_MS);
+    }
 }
 
 static void http_get_task(void *pvParameters)
@@ -174,7 +340,25 @@ static void http_get_task(void *pvParameters)
 
 void app_main()
 {
+    ESP_LOGI(TAG, "START app_main\r\n");
+
+    // Set UART Parameter.
+    uart_set_baud(0, 115200);
+
+    // Give the UART some time to settle
+    vTaskDelay(1);
+
     nvs_flash_init();
-    initialise_wifi();
-    xTaskCreate(&http_get_task, "http_get_task", 2048, NULL, 5, NULL);
+    // initialise_wifi();
+
+    // create a user task to fetch data from a webserver
+    // xTaskCreate(&http_get_task, "http_get_task", TASK_STACK_DEPTH, NULL, 2, NULL);
+
+    // create a user task to fetch data from the I2S microphone
+    xTaskCreate(&microphone_task, "microphone_task", TASK_STACK_DEPTH, NULL, 6, NULL);
+
+    // create a user task that fetches data from sensor periodically
+    xTaskCreate(&periodic_accel_task, "periodic_accel_task", TASK_STACK_DEPTH, NULL, 5, NULL);
+
+    ESP_LOGI(TAG, "FINISH app_main\r\n");
 }
