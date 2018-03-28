@@ -218,19 +218,16 @@ static void microphone_task(void *pvParameters)
         // passive waiting until 1 second is over
         // vTaskDelay(100/portTICK_PERIOD_MS);
 
-        char *buf_ptr_read = buf;
-
-        // read whole block of samples
         int bytes_read = 0;
         while(bytes_read == 0) {
-	    bytes_read = i2s_read_bytes(i2s_num, buf, buf_len, 0);
+	    bytes_read = i2s_read_bytes(i2s_num, buf, buf_len, 100000);
         }
 
 	ESP_LOGI(TAG, "Read %d bytes", bytes_read);
 
 	uint32_t samples_read = bytes_read / 2 / (I2S_BITS_PER_SAMPLE_32BIT / 8);
 
-	ESP_LOGI(TAG, "Read %d samples (%d)", samples_read, buf_ptr_read[3]);
+	ESP_LOGI(TAG, "Read %d samples (%d.%d.%d.%d.%d.%d)", samples_read, buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
 
 	cnt += samples_read;
 
