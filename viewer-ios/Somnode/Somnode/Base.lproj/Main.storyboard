@@ -49,6 +49,11 @@
                                     <action selector="sineClick:" destination="BYZ-38-t0r" eventType="touchUpInside" id="OYL-4j-SLc"/>
                                 </connections>
                             </button>
+                            <view contentMode="scaleToFill" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RNU-bU-phr" customClass="WaterfallView" customModule="Somnode" customModuleProvider="target">
+                                <rect key="frame" x="0.0" y="78" width="375" height="235"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                            </view>
                         </subviews>
                         <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
@@ -56,10 +61,12 @@
                     <connections>
                         <outlet property="infoLabel" destination="IBf-tg-h4G" id="Wgy-ig-4Fu"/>
                         <outlet property="playButton" destination="iqW-zd-ASb" id="rVG-Lx-vMS"/>
+                        <outlet property="waterfall" destination="RNU-bU-phr" id="5rr-xK-b2P"/>
                     </connections>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="dkx-z0-nzr" sceneMemberID="firstResponder"/>
             </objects>
+            <point key="canvasLocation" x="32.799999999999997" y="32.833583208395808"/>
         </scene>
     </scenes>
 </document>

@@ -8,6 +8,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 #import "ViewController.h"
+#import "Somnode-Swift.h"
 
 @interface ViewController ()
 {
@@ -16,8 +17,13 @@
     AVAudioMixerNode  *_mixer;
     AVAudioFile       *_file;
     AVAudioPCMBuffer  *_buffer;
+    
+    RecordAudio       *_recorder;
+    
     __weak IBOutlet UIButton *playButton;
     __weak IBOutlet UILabel  *infoLabel;
+    __weak IBOutlet WaterfallView *waterfall;
+
 }
 @end
 
@@ -27,13 +33,36 @@
     [super viewDidLoad];
 
     [self createPlayerEngine];
+    [self createRecorder];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+
     [self startEngine];
+//    [self startRecorder];
+//    [self startAudioDisplay];
+}
+
+// Create the RecordAudio object
+- (void)createRecorder {
+    _recorder = [[RecordAudio alloc] init];
+}
+
+- (void)startRecorder {
+    [_recorder startRecording];
+}
+
+// Starts a 60fps render timer loop
+- (void)startAudioDisplay {
+    CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateViews:)];
+    displayLink.preferredFramesPerSecond = 60;
+    [displayLink addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
 }
 
 // Create audio player object, engine object and attach them
 - (void)createPlayerEngine {
     NSError *error;
-    BOOL success = NO;
 
     // Construct URL to sound file
     NSString *path = [NSString stringWithFormat:@"%@/8k16bitpcm.wav", [[NSBundle mainBundle] resourcePath]];
@@ -156,6 +185,16 @@
             }
             break;
         }
+    }
+}
+
+- (void)updateViews:(CADisplayLink *)sender {
+    if (_recorder == nil) {
+        return;
+    }
+    if([_recorder isRecording]) {
+        [ProcessAudio makeSpectrumFromAudio:_recorder];
+        [waterfall setNeedsDisplay];
     }
 }
 
