@@ -8,7 +8,7 @@ This code is meant to function as a digital stethoscope, connected to an iPhone 
 
 ### viewer-ios
 
-An iOS app to stream audio and accelerometer data and running signal processing code. (FFT)
+An iOS app to stream audio and accelerometer data and running signal processing code using the Metal API for FFT.
 
 ### audio-segmentation
 
